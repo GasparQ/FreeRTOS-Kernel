@@ -36,9 +36,6 @@
 #endif
 /* *INDENT-ON* */
 
-#include "pico.h"
-#include "hardware/sync.h"
-
 /*-----------------------------------------------------------
  * Port specific definitions.
  *
@@ -48,6 +45,8 @@
  * These settings should not be altered.
  *-----------------------------------------------------------
  */
+
+#define portINLINE inline
 
 /* Type definitions. */
 #define portCHAR          char
@@ -137,8 +136,9 @@ extern void vPortYield( void );
     #error "Invalid tick core specified in config!"
 #endif
 /* FreeRTOS core id is always zero based, so always 0 if we're running on only one core */
+extern BaseType_t xPortGET_CORE_ID();
 #if configNUMBER_OF_CORES == portMAX_CORE_COUNT
-    #define portGET_CORE_ID()    get_core_num()
+    #define portGET_CORE_ID()    xPortGET_CORE_ID()
 #else
     #define portGET_CORE_ID()    0
 #endif
@@ -206,52 +206,9 @@ extern void vPortEnableInterrupts();
 /* Note this is a single method with uxAcquire parameter since we have
  * static vars, the method is always called with a compile time constant for
  * uxAcquire, and the compiler should dothe right thing! */
-static inline void vPortRecursiveLock( uint32_t ulLockNum,
-                                       spin_lock_t * pxSpinLock,
-                                       BaseType_t uxAcquire )
-{
-    static uint8_t ucOwnedByCore[ portMAX_CORE_COUNT ];
-    static uint8_t ucRecursionCountByLock[ portRTOS_SPINLOCK_COUNT ];
-
-    configASSERT( ulLockNum < portRTOS_SPINLOCK_COUNT );
-    uint32_t ulCoreNum = get_core_num();
-    uint32_t ulLockBit = 1u << ulLockNum;
-    configASSERT( ulLockBit < 256u );
-
-    if( uxAcquire )
-    {
-        if( __builtin_expect( !*pxSpinLock, 0 ) )
-        {
-            if( ucOwnedByCore[ ulCoreNum ] & ulLockBit )
-            {
-                configASSERT( ucRecursionCountByLock[ ulLockNum ] != 255u );
-                ucRecursionCountByLock[ ulLockNum ]++;
-                return;
-            }
-
-            while( __builtin_expect( !*pxSpinLock, 0 ) )
-            {
-            }
-        }
-
-        __mem_fence_acquire();
-        configASSERT( ucRecursionCountByLock[ ulLockNum ] == 0 );
-        ucRecursionCountByLock[ ulLockNum ] = 1;
-        ucOwnedByCore[ ulCoreNum ] |= ulLockBit;
-    }
-    else
-    {
-        configASSERT( ( ucOwnedByCore[ ulCoreNum ] & ulLockBit ) != 0 );
-        configASSERT( ucRecursionCountByLock[ ulLockNum ] != 0 );
-
-        if( !--ucRecursionCountByLock[ ulLockNum ] )
-        {
-            ucOwnedByCore[ ulCoreNum ] &= ~ulLockBit;
-            __mem_fence_release();
-            *pxSpinLock = 1;
-        }
-    }
-}
+extern void vPortRecursiveLock( uint32_t ulLockNum,
+                                uint32_t ulSpinLockId,
+                                BaseType_t uxAcquire );
 
 #if ( configNUMBER_OF_CORES == 1 )
     #define portGET_ISR_LOCK()
@@ -259,10 +216,10 @@ static inline void vPortRecursiveLock( uint32_t ulLockNum,
     #define portGET_TASK_LOCK()
     #define portRELEASE_TASK_LOCK()
 #else
-    #define portGET_ISR_LOCK()         vPortRecursiveLock( 0, spin_lock_instance( configSMP_SPINLOCK_0 ), pdTRUE )
-    #define portRELEASE_ISR_LOCK()     vPortRecursiveLock( 0, spin_lock_instance( configSMP_SPINLOCK_0 ), pdFALSE )
-    #define portGET_TASK_LOCK()        vPortRecursiveLock( 1, spin_lock_instance( configSMP_SPINLOCK_1 ), pdTRUE )
-    #define portRELEASE_TASK_LOCK()    vPortRecursiveLock( 1, spin_lock_instance( configSMP_SPINLOCK_1 ), pdFALSE )
+    #define portGET_ISR_LOCK()         vPortRecursiveLock( 0, configSMP_SPINLOCK_0, pdTRUE )
+    #define portRELEASE_ISR_LOCK()     vPortRecursiveLock( 0, configSMP_SPINLOCK_0, pdFALSE )
+    #define portGET_TASK_LOCK()        vPortRecursiveLock( 1, configSMP_SPINLOCK_1, pdTRUE )
+    #define portRELEASE_TASK_LOCK()    vPortRecursiveLock( 1, configSMP_SPINLOCK_1, pdFALSE )
 #endif
 
 /*-----------------------------------------------------------*/

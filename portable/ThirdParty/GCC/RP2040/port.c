@@ -36,18 +36,24 @@
 #include "rp2040_config.h"
 #include "hardware/clocks.h"
 #include "hardware/exception.h"
+#include "hardware/sync.h"
+
+/* TODO : consider to remove this macro. */
+#define VALUE_TO_STRING(x) #x
+#define VALUE(x) VALUE_TO_STRING(x)
+#define VAR_NAME_VALUE(var) #var "="  VALUE(var)
+
+#define portRUNNING_ON_BOTH_CORES             ( configNUMBER_OF_CORES == portMAX_CORE_COUNT )
 
 /*
  * LIB_PICO_MULTICORE == 1, if we are linked with pico_multicore (note that
  * the non SMP FreeRTOS_Kernel is not linked with pico_multicore itself). We
  * use this flag to determine if we need multi-core functionality.
  */
-#if ( LIB_PICO_MULTICORE == 1 )
+#if portRUNNING_ON_BOTH_CORES
     #include "pico/multicore.h"
 #endif /* LIB_PICO_MULTICORE */
 
-/* TODO : consider to remove this macro. */
-#define portRUNNING_ON_BOTH_CORES             ( configNUMBER_OF_CORES == portMAX_CORE_COUNT )
 
 /* Constants required to manipulate the NVIC. */
 #define portNVIC_SYSTICK_CTRL_REG             ( *( ( volatile uint32_t * ) 0xe000e010 ) )
@@ -509,6 +515,57 @@ void vPortEnableInterrupts( void )
     __asm volatile ( " cpsie i " ::: "memory" );
 }
 
+/* Note this is a single method with uxAcquire parameter since we have
+ * static vars, the method is always called with a compile time constant for
+ * uxAcquire, and the compiler should dothe right thing! */
+void vPortRecursiveLock( uint32_t ulLockNum,
+                         uint32_t ulSpinLockId,
+                         BaseType_t uxAcquire )
+{
+    spin_lock_t * pxSpinLock = spin_lock_instance(ulSpinLockId);
+    static uint8_t ucOwnedByCore[ portMAX_CORE_COUNT ];
+    static uint8_t ucRecursionCountByLock[ portRTOS_SPINLOCK_COUNT ];
+
+    configASSERT( ulLockNum < portRTOS_SPINLOCK_COUNT );
+    uint32_t ulCoreNum = get_core_num();
+    uint32_t ulLockBit = 1u << ulLockNum;
+    configASSERT( ulLockBit < 256u );
+
+    if( uxAcquire )
+    {
+        if( __builtin_expect( !*pxSpinLock, 0 ) )
+        {
+            if( ucOwnedByCore[ ulCoreNum ] & ulLockBit )
+            {
+                configASSERT( ucRecursionCountByLock[ ulLockNum ] != 255u );
+                ucRecursionCountByLock[ ulLockNum ]++;
+                return;
+            }
+
+            while( __builtin_expect( !*pxSpinLock, 0 ) )
+            {
+            }
+        }
+
+        __mem_fence_acquire();
+        configASSERT( ucRecursionCountByLock[ ulLockNum ] == 0 );
+        ucRecursionCountByLock[ ulLockNum ] = 1;
+        ucOwnedByCore[ ulCoreNum ] |= ulLockBit;
+    }
+    else
+    {
+        configASSERT( ( ucOwnedByCore[ ulCoreNum ] & ulLockBit ) != 0 );
+        configASSERT( ucRecursionCountByLock[ ulLockNum ] != 0 );
+
+        if( !--ucRecursionCountByLock[ ulLockNum ] )
+        {
+            ucOwnedByCore[ ulCoreNum ] &= ~ulLockBit;
+            __mem_fence_release();
+            *pxSpinLock = 1;
+        }
+    }
+}
+
 /*-----------------------------------------------------------*/
 
 uint32_t ulSetInterruptMaskFromISR( void )
@@ -529,6 +586,13 @@ void vClearInterruptMaskFromISR( __attribute__( ( unused ) ) uint32_t ulMask )
         " bx lr                "
         ::: "memory"
         );
+}
+
+/*-----------------------------------------------------------*/
+
+BaseType_t xPortGET_CORE_ID()
+{
+    return get_core_num();
 }
 
 /*-----------------------------------------------------------*/
