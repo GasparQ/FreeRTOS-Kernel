@@ -1099,6 +1099,13 @@ if(FREERTOS_PORT STREQUAL GCC_POSIX)
     find_package(Threads REQUIRED)
 endif()
 
+# Add RTOS Adapter header for RP2040 Pico SDK
+if(FREERTOS_PORT STREQUAL GCC_RP2040 AND PICO_SDK_VERSION_STRING VERSION_GREATER_EQUAL "1.3.2")
+    target_compile_definitions(freertos_kernel_port INTERFACE
+        PICO_CONFIG_RTOS_ADAPTER_HEADER=ThirdParty/GCC/RP2040/include/freertos_sdk_config.h
+    )
+endif()
+
 target_link_libraries(freertos_kernel_port
     PUBLIC
         $<$<STREQUAL:${FREERTOS_PORT},GCC_RP2040>:pico_base_headers>
@@ -1107,6 +1114,6 @@ target_link_libraries(freertos_kernel_port
     PRIVATE
         freertos_kernel_include
         $<$<STREQUAL:${FREERTOS_PORT},GCC_POSIX>:Threads::Threads>
-        $<$<STREQUAL:${FREERTOS_PORT},GCC_RP2040>:hardware_clocks;hardware_exception;hardware_sync;pico_multicore;pico_runtime_init;pico_runtime>
+        $<$<STREQUAL:${FREERTOS_PORT},GCC_RP2040>:hardware_sync;pico_runtime_init;pico_runtime;hardware_clocks;hardware_exception;pico_multicore>
         $<$<STREQUAL:${FREERTOS_PORT},MSVC_MINGW>:winmm> # Windows library which implements timers
 )

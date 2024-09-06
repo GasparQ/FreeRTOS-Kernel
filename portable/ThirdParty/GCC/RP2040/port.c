@@ -31,29 +31,25 @@
  * Implementation of functions defined in portable.h for the RP2040 port.
  *----------------------------------------------------------------------*/
 
-#include "FreeRTOS.h"
-#include "task.h"
-#include "rp2040_config.h"
 #include "hardware/clocks.h"
 #include "hardware/exception.h"
 #include "hardware/sync.h"
 
-/* TODO : consider to remove this macro. */
-#define VALUE_TO_STRING(x) #x
-#define VALUE(x) VALUE_TO_STRING(x)
-#define VAR_NAME_VALUE(var) #var "="  VALUE(var)
-
-#define portRUNNING_ON_BOTH_CORES             ( configNUMBER_OF_CORES == portMAX_CORE_COUNT )
+#include "FreeRTOS.h"
+#include "task.h"
+#include "rp2040_config.h"
 
 /*
  * LIB_PICO_MULTICORE == 1, if we are linked with pico_multicore (note that
  * the non SMP FreeRTOS_Kernel is not linked with pico_multicore itself). We
  * use this flag to determine if we need multi-core functionality.
  */
-#if portRUNNING_ON_BOTH_CORES
+#if ( LIB_PICO_MULTICORE == 1 )
     #include "pico/multicore.h"
 #endif /* LIB_PICO_MULTICORE */
 
+/* TODO : consider to remove this macro. */
+#define portRUNNING_ON_BOTH_CORES             ( configNUMBER_OF_CORES == portMAX_CORE_COUNT )
 
 /* Constants required to manipulate the NVIC. */
 #define portNVIC_SYSTICK_CTRL_REG             ( *( ( volatile uint32_t * ) 0xe000e010 ) )
